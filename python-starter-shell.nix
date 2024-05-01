@@ -1,68 +1,54 @@
+with import <nixpkgs> { };
+
 let
- 
-  pkgs = import <nixpkgs> {
-    config = {
-      # allowUnfree may be necessary for some packages, but in general you should not need it.
-      allowUnfree = false;
-    };
-  };
+  pythonPackages = python3Packages;
+in
+pkgs.mkShell rec {
+  name = "impurePythonEnv";
+  venvDir = "./.venv";
+  myPythonPackages = with pythonPackages; [
+    # A Python interpreter including the 'venv' module is required to bootstrap
+    # the environment.
+    python
+    # This executes some shell code to initialize a venv in $venvDir before
+    # dropping into the shell
+    venvShellHook
 
-  # This is the Python version that will be used.
-  myPython = pkgs.python311;
-
-  pythonWithPkgs = myPython.withPackages (pythonPkgs: with pythonPkgs; [
-    # This list contains tools for Python development.
-    # You can also add other tools, like black.
-    #
-    # Note that even if you add Python packages here like PyTorch or Tensorflow,
-    # they will be reinstalled when running `pip -r requirements.txt` because
-    # virtualenv is used below in the shellHook.
-    ipython
+    # Those are dependencies that we would like to use from nixpkgs, which will
+    # add them to PYTHONPATH and thus make them accessible from within the venv.
     pip
-    setuptools
-    virtualenvwrapper
-    wheel
-  ]);
+    numpy
+  ];
+  buildInputs = [
 
-  lib-path = with pkgs; lib.makeLibraryPath [
-    libffi
+    myPythonPackages
+    # In this particular example, in order to compile any binary extensions they may
+    # require, the Python modules listed in the hypothetical requirements.txt need
+    # the following packages to be installed locally:
+    taglib
     openssl
-    stdenv.cc.cc
-    # If you want to use CUDA, you should uncomment this line.
-    # linuxPackages.nvidia_x11
+    git
+    libxml2
+    libxslt
+    libzip
+    zlib
   ];
 
-  shell = pkgs.mkShell {
-    buildInputs = [
-      # my python and packages
-      pythonWithPkgs
+  # Run this command, only after creating the virtual environment
+  postVenvCreation = ''
+    unset SOURCE_DATE_EPOCH
+    # check if there is a requirements.txt file
+    if test -f requirements.txt; then
+      # install the requirements
+      pip install -r requirements.txt
+    fi
+  '';
 
-      # other packages needed for compiling python libs
-      pkgs.readline
-      pkgs.libffi
-      pkgs.openssl
+  # Now we can execute any commands within the virtual environment.
+  # This is optional and can be left out to run pip manually.
+  postShellHook = ''
+    # allow pip to install wheels
+    unset SOURCE_DATE_EPOCH
+  '';
 
-      # unfortunately needed because of messing with LD_LIBRARY_PATH below
-      pkgs.git
-      pkgs.openssh
-      pkgs.rsync
-    ];
-
-    shellHook = ''
-      # Allow the use of wheels.
-      SOURCE_DATE_EPOCH=$(date +%s)
-      # Augment the dynamic linker path
-      export "LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${lib-path}"
-      # Setup the virtual environment if it doesn't already exist.
-      VENV=.venv
-      if test ! -d $VENV; then
-        virtualenv $VENV
-      fi
-      source ./$VENV/bin/activate
-      export PYTHONPATH=`pwd`/$VENV/${myPython.sitePackages}/:$PYTHONPATH
-      fish
-    '';
-  };
-in
-
-shell
+}
